@@ -1,9 +1,4 @@
-package request
-
-// Metadata is used by clients to inform the server that the next request will be of `RequestType` type
-type Metadata struct {
-	RequestType string // Request type
-}
+package event
 
 // Join is used by users to join to a specific chat room
 type Join struct {
