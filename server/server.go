@@ -1,8 +1,13 @@
 package server
 
 import (
+	"encoding/gob"
+	"io"
 	"log"
 	"net"
+
+	"github.com/mostafa-asg/hodhod/event"
+	"github.com/mostafa-asg/hodhod/util"
 )
 
 type user struct {
@@ -15,6 +20,7 @@ type Config struct {
 	Binding string //syntax is host:port
 }
 
+//Server represent the serer
 type Server struct {
 	Config     *Config
 	HasStarted chan bool
@@ -73,4 +79,60 @@ func accept(s *Server, con net.Conn) {
 
 	defer con.Close()
 
+	decoder := gob.NewDecoder(con)
+
+	var metadata event.Metadata
+	var joinEvent event.Join
+
+	for {
+		err := decoder.Decode(&metadata)
+		if err != nil {
+			if err == io.EOF {
+				return
+			}
+			log.Println("error decodign metadata request from client", err)
+			return
+		}
+
+		switch metadata.EventType {
+		case "join":
+			err := decoder.Decode(&joinEvent)
+			if err != nil {
+				if err == io.EOF {
+					return
+				}
+				log.Println("error decodign join request from client", err)
+				return
+			}
+
+			users, ok := s.chatrooms[joinEvent.Chatroom]
+			if !ok {
+				// This user is the first user that has joined the chatroom
+				users = make(map[string]*user)
+				s.chatrooms[joinEvent.Chatroom] = users
+			}
+
+			encoder := gob.NewEncoder(con)
+			encoder.Encode(&event.ChatroomUsers{Users: s.getChatroomUsers(joinEvent.Chatroom)})
+
+			uuid, _ := util.NewUUID()
+			//TODO remove this line
+			log.Println(joinEvent.Nickname + "->" + uuid)
+			users[uuid] = &user{con: con, nickname: joinEvent.Nickname}
+		}
+	}
+}
+
+func (s *Server) getChatroomUsers(chatroomName string) map[string]string {
+	users, ok := s.chatrooms[chatroomName]
+	if !ok {
+		return make(map[string]string)
+	}
+
+	result := make(map[string]string)
+	for uuid, userInfo := range users {
+		result[uuid] = userInfo.nickname
+	}
+
+	return result
 }
