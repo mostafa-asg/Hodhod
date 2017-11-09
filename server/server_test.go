@@ -6,8 +6,7 @@ import (
 	"github.com/mostafa-asg/hodhod/server"
 )
 
-func TestStartAndStopTheServer(t *testing.T) {
-
+func startTheServer(t *testing.T) *server.Server {
 	opts := &server.Config{
 		Binding: "localhost:0",
 	}
@@ -23,9 +22,19 @@ func TestStartAndStopTheServer(t *testing.T) {
 
 	//Wait until server started
 	<-s.HasStarted
+	return s
+}
+
+func TestStartAndStopTheServer(t *testing.T) {
+
+	s := startTheServer(t)
 
 	err := s.Stop()
 	if err != nil {
 		t.Error("Error in closing the server", err)
 	}
+}
+
+func TestJoiningUsersToChatrooms(t *testing.T) {
+
 }
