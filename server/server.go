@@ -5,6 +5,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"sync"
 
 	"github.com/mostafa-asg/hodhod/event"
 	"github.com/mostafa-asg/hodhod/util"
@@ -25,7 +26,9 @@ type Server struct {
 	Config     *Config
 	HasStarted chan bool
 	listener   net.Listener
-	chatrooms  map[string]map[string]*user
+
+	chatrooms      map[string]map[string]*user
+	chatroomsMutex sync.Mutex
 }
 
 //HostAndPort return host and port of the server
@@ -105,26 +108,40 @@ func accept(s *Server, con net.Conn) {
 				return
 			}
 
-			users, ok := s.chatrooms[joinEvent.Chatroom]
-			if !ok {
-				// This user is the first user that has joined the chatroom
-				users = make(map[string]*user)
-				s.chatrooms[joinEvent.Chatroom] = users
-			}
+			users := s.getChatroomUsers(joinEvent.Chatroom)
+			uuid := s.addUserToChatroom(joinEvent.Chatroom, &user{con: con, nickname: joinEvent.Nickname})
 
 			encoder := gob.NewEncoder(con)
-			encoder.Encode(&event.ChatroomUsers{Users: s.getChatroomUsers(joinEvent.Chatroom)})
+			encoder.Encode(&event.ChatroomUsers{Users: users})
 
-			uuid, _ := util.NewUUID()
 			//TODO remove this line
 			log.Println(joinEvent.Nickname + "->" + uuid)
-			users[uuid] = &user{con: con, nickname: joinEvent.Nickname}
 		}
 	}
 }
 
-func (s *Server) getChatroomUsers(chatroomName string) map[string]string {
+func (s *Server) addUserToChatroom(chatroomName string, userInfo *user) string {
+
+	uuid, _ := util.NewUUID()
+
+	s.chatroomsMutex.Lock()
 	users, ok := s.chatrooms[chatroomName]
+	if !ok {
+		// This user is the first user that has joined the chatroom
+		users = make(map[string]*user)
+		s.chatrooms[chatroomName] = users
+	}
+	users[uuid] = userInfo
+	s.chatroomsMutex.Unlock()
+
+	return uuid
+}
+
+func (s *Server) getChatroomUsers(chatroomName string) map[string]string {
+	s.chatroomsMutex.Lock()
+	users, ok := s.chatrooms[chatroomName]
+	s.chatroomsMutex.Unlock()
+
 	if !ok {
 		return make(map[string]string)
 	}
