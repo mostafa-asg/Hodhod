@@ -1,7 +1,7 @@
 package server
 
 import (
-	"encoding/gob"
+	encoding "encoding/json"
 	"io"
 	"log"
 	"net"
@@ -82,7 +82,7 @@ func accept(s *Server, con net.Conn) {
 
 	defer con.Close()
 
-	decoder := gob.NewDecoder(con)
+	decoder := encoding.NewDecoder(con)
 
 	var metadata event.Metadata
 	var joinEvent event.Join
@@ -111,7 +111,7 @@ func accept(s *Server, con net.Conn) {
 			users := s.getChatroomUsers(joinEvent.Chatroom)
 			uuid := s.addUserToChatroom(joinEvent.Chatroom, &user{con: con, nickname: joinEvent.Nickname})
 
-			encoder := gob.NewEncoder(con)
+			encoder := encoding.NewEncoder(con)
 			encoder.Encode(&event.ChatroomUsers{Users: users})
 
 			//TODO remove this line

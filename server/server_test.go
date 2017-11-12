@@ -1,7 +1,7 @@
 package server_test
 
 import (
-	"encoding/gob"
+	encoding "encoding/json"
 	"net"
 	"testing"
 
@@ -45,8 +45,8 @@ func connectToServer(t *testing.T, serverAddr string,
 		t.Fatal("Could not connect to server", err)
 	}
 
-	encoder := gob.NewEncoder(con)
-	decoder := gob.NewDecoder(con)
+	encoder := encoding.NewEncoder(con)
+	decoder := encoding.NewDecoder(con)
 
 	encoder.Encode(&event.Metadata{EventType: "join"})
 	encoder.Encode(&event.Join{Nickname: nickname, Chatroom: chatroom})
