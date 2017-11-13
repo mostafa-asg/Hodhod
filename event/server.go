@@ -11,10 +11,12 @@ type NewUserJoined struct {
 
 // NewMessage sends message to specific user
 type NewMessage struct {
+	FromID  string
 	Message string
 }
 
-// ChatroomUsers is used by server whenever a user joined to show all availble user
-type ChatroomUsers struct {
-	Users []*model.User
+// JoinResponse is used by server whenever a user joined
+type JoinResponse struct {
+	Users  []*model.User // all availble users on this chatroom
+	YourID string        // your id
 }

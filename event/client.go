@@ -13,6 +13,8 @@ type Leave struct {
 
 //Message is used by users to send private message to other users
 type Message struct {
+	Chatroom   string
+	FromID     string
 	RecieverID string
 	Message    string
 }

@@ -11,6 +11,11 @@ import (
 	"github.com/mostafa-asg/hodhod/server"
 )
 
+type clientInfo struct {
+	connection net.Conn
+	id         string
+}
+
 func startTheServer(t *testing.T) *server.Server {
 	opts := &server.Config{
 		Binding: "localhost:0",
@@ -41,7 +46,7 @@ func TestStartAndStopTheServer(t *testing.T) {
 }
 
 func connectToServer(t *testing.T, serverAddr string,
-	nickname string, chatroom string, availableUsers []string, futureJoinUsers []string, wg *sync.WaitGroup) net.Conn {
+	nickname string, chatroom string, availableUsers []string, futureJoinUsers []string, wg *sync.WaitGroup) *clientInfo {
 	con, err := net.Dial("tcp4", serverAddr)
 	if err != nil {
 		t.Fatal("Could not connect to server", err)
@@ -53,19 +58,19 @@ func connectToServer(t *testing.T, serverAddr string,
 	encoder.Encode(&model.Metadata{EventType: "join"})
 	encoder.Encode(&event.Join{Nickname: nickname, Chatroom: chatroom})
 
-	var chatroomUsers event.ChatroomUsers
-	err = decoder.Decode(&chatroomUsers)
+	var joinResponse event.JoinResponse
+	err = decoder.Decode(&joinResponse)
 	if err != nil {
 		t.Fatal("error in decoding chatroom users", err)
 	}
 
-	actualUsers := len(chatroomUsers.Users)
+	actualUsers := len(joinResponse.Users)
 	if len(availableUsers) != actualUsers {
 		t.Errorf("Expected %d user(s) in chatroom but find %d user(s)", len(availableUsers), actualUsers)
 	}
 
 	if actualUsers > 0 {
-		for _, user := range chatroomUsers.Users {
+		for _, user := range joinResponse.Users {
 			if !contains(availableUsers, user.Nickname) {
 				t.Errorf("user %s not found in chatroom", user.Nickname)
 			}
@@ -102,12 +107,12 @@ func connectToServer(t *testing.T, serverAddr string,
 		wg.Done()
 	}()
 
-	return con
+	return &clientInfo{connection: con, id: joinResponse.YourID}
 }
 
-func contains(users []string, user string) bool {
-	for _, val := range users {
-		if val == user {
+func contains(slice []string, data string) bool {
+	for _, val := range slice {
+		if val == data {
 			return true
 		}
 	}
@@ -122,16 +127,77 @@ func TestJoiningUsersToChatrooms(t *testing.T) {
 	var wg sync.WaitGroup
 
 	client1 := connectToServer(t, s.HostAndPort(), "John", "room1", nil, []string{"Sara", "Bill", "Kevin"}, &wg)
-	defer client1.Close()
 
 	client2 := connectToServer(t, s.HostAndPort(), "Sara", "room1", []string{"John"}, []string{"Bill", "Kevin"}, &wg)
-	defer client2.Close()
 
 	client3 := connectToServer(t, s.HostAndPort(), "Bill", "room1", []string{"John", "Sara"}, []string{"Kevin"}, &wg)
-	defer client3.Close()
 
 	client4 := connectToServer(t, s.HostAndPort(), "Kevin", "room1", []string{"John", "Sara", "Bill"}, nil, &wg)
-	defer client4.Close()
 
 	wg.Wait()
+
+	//Stop clients
+	client1.connection.Close()
+	client2.connection.Close()
+	client3.connection.Close()
+	client4.connection.Close()
+
+	//stop the server
+	err := s.Stop()
+	if err != nil {
+		t.Error("Error in closing the server", err)
+	}
+}
+
+func sendMessage(sender *clientInfo, receiver *clientInfo, chatroom string, message string) {
+
+	encoder := encoding.NewEncoder(sender.connection)
+	encoder.Encode(&model.Metadata{EventType: "send_msg"})
+	encoder.Encode(&event.Message{Chatroom: chatroom, FromID: sender.id, RecieverID: receiver.id, Message: message})
+
+}
+
+func receiveMessage(t *testing.T, client *clientInfo, expectedMessages []string) {
+	decoder := encoding.NewDecoder(client.connection)
+
+	var metadata model.Metadata
+	var msg event.NewMessage
+	count := 0
+
+	for count < len(expectedMessages) {
+		decoder.Decode(&metadata)
+
+		if metadata.EventType == "new_msg" {
+			decoder.Decode(&msg)
+			if !contains(expectedMessages, msg.Message) {
+				t.Errorf("invalid message : %s", msg.Message)
+			}
+			count++
+		}
+	}
+}
+
+func TestMessageBetweenTwoUser(t *testing.T) {
+	s := startTheServer(t)
+	var wg sync.WaitGroup
+
+	client1 := connectToServer(t, s.HostAndPort(), "Ben", "room1", nil, []string{"Tom"}, &wg)
+
+	client2 := connectToServer(t, s.HostAndPort(), "Tom", "room1", []string{"Ben"}, nil, &wg)
+
+	wg.Wait()
+
+	sendMessage(client1, client2, "room1", "Hi")
+	sendMessage(client1, client2, "room1", "How are you Tom?")
+
+	receiveMessage(t, client2, []string{"Hi", "How are you Tom?"})
+
+	client1.connection.Close()
+	client2.connection.Close()
+
+	//stop the server
+	err := s.Stop()
+	if err != nil {
+		t.Error("Error in closing the server", err)
+	}
 }

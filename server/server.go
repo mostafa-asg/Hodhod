@@ -2,6 +2,7 @@ package server
 
 import (
 	encoding "encoding/json"
+	"errors"
 	"io"
 	"log"
 	"net"
@@ -76,12 +77,9 @@ func New(conf *Config) *Server {
 
 func accept(s *Server, con net.Conn) {
 
-	defer con.Close()
-
 	decoder := encoding.NewDecoder(con)
 
 	var metadata model.Metadata
-	var joinEvent event.Join
 
 	for {
 		err := decoder.Decode(&metadata)
@@ -95,12 +93,13 @@ func accept(s *Server, con net.Conn) {
 
 		switch metadata.EventType {
 		case "join":
+			var joinEvent event.Join
 			err := decoder.Decode(&joinEvent)
 			if err != nil {
 				if err == io.EOF {
 					return
 				}
-				log.Println("error decodign join request from client", err)
+				log.Println("error decoding join request from client", err)
 				return
 			}
 
@@ -109,15 +108,43 @@ func accept(s *Server, con net.Conn) {
 
 			encoder := encoding.NewEncoder(con)
 			//Send available users to the newly joined user
-			encoder.Encode(&event.ChatroomUsers{Users: users})
+			encoder.Encode(&event.JoinResponse{Users: users, YourID: uuid})
 
 			//TODO remove this line
 			log.Println(joinEvent.Nickname + "->" + uuid)
 
 			//Notify to other users that someone has joined
 			go s.notiftyNewUserJoined(users, joinEvent.Nickname)
+		case "send_msg":
+			var msg event.Message
+			err := decoder.Decode(&msg)
+			if err != nil {
+				if err == io.EOF {
+					return
+				}
+				log.Println("error decoding message request from client", err)
+				return
+			}
+			users := s.chatrooms[msg.Chatroom]
+			recipient, err := find(users, msg.RecieverID)
+			if err != nil {
+				//TODO send error to the client
+				break
+			}
+			encoder := encoding.NewEncoder(recipient.Connection)
+			encoder.Encode(&model.Metadata{EventType: "new_msg"})
+			encoder.Encode(&event.NewMessage{FromID: msg.FromID, Message: msg.Message})
 		}
 	}
+}
+
+func find(users []*model.User, userID string) (usr *model.User, err error) {
+	for _, user := range users {
+		if user.ID == userID {
+			return user, nil
+		}
+	}
+	return nil, errors.New("User not found")
 }
 
 func (s *Server) notiftyNewUserJoined(others []*model.User, newUserNickname string) {
