@@ -8,13 +8,9 @@ import (
 	"sync"
 
 	"github.com/mostafa-asg/hodhod/event"
+	"github.com/mostafa-asg/hodhod/model"
 	"github.com/mostafa-asg/hodhod/util"
 )
-
-type user struct {
-	con      net.Conn
-	nickname string
-}
 
 //Config configures the server
 type Config struct {
@@ -27,7 +23,7 @@ type Server struct {
 	HasStarted chan bool
 	listener   net.Listener
 
-	chatrooms      map[string]map[string]*user
+	chatrooms      map[string][]*model.User
 	chatroomsMutex sync.Mutex
 }
 
@@ -73,7 +69,7 @@ func New(conf *Config) *Server {
 
 	s := &Server{Config: conf}
 	s.HasStarted = make(chan bool, 1)
-	s.chatrooms = make(map[string]map[string]*user)
+	s.chatrooms = make(map[string][]*model.User)
 
 	return s
 }
@@ -84,7 +80,7 @@ func accept(s *Server, con net.Conn) {
 
 	decoder := encoding.NewDecoder(con)
 
-	var metadata event.Metadata
+	var metadata model.Metadata
 	var joinEvent event.Join
 
 	for {
@@ -109,47 +105,60 @@ func accept(s *Server, con net.Conn) {
 			}
 
 			users := s.getChatroomUsers(joinEvent.Chatroom)
-			uuid := s.addUserToChatroom(joinEvent.Chatroom, &user{con: con, nickname: joinEvent.Nickname})
+			uuid := s.addUserToChatroom(joinEvent.Chatroom, &model.User{Connection: con, Nickname: joinEvent.Nickname})
 
 			encoder := encoding.NewEncoder(con)
+			//Send available users to the newly joined user
 			encoder.Encode(&event.ChatroomUsers{Users: users})
 
 			//TODO remove this line
 			log.Println(joinEvent.Nickname + "->" + uuid)
+
+			//Notify to other users that someone has joined
+			go s.notiftyNewUserJoined(users, joinEvent.Nickname)
 		}
 	}
 }
 
-func (s *Server) addUserToChatroom(chatroomName string, userInfo *user) string {
+func (s *Server) notiftyNewUserJoined(others []*model.User, newUserNickname string) {
+
+	for _, user := range others {
+		go func(u *model.User) {
+
+			encoder := encoding.NewEncoder(u.Connection)
+			encoder.Encode(&model.Metadata{EventType: "newUser"})
+			encoder.Encode(&event.NewUserJoined{Nickname: newUserNickname})
+
+		}(user)
+	}
+}
+
+func (s *Server) addUserToChatroom(chatroomName string, user *model.User) string {
 
 	uuid, _ := util.NewUUID()
 
 	s.chatroomsMutex.Lock()
 	users, ok := s.chatrooms[chatroomName]
 	if !ok {
-		// This user is the first user that has joined the chatroom
-		users = make(map[string]*user)
-		s.chatrooms[chatroomName] = users
+		users = make([]*model.User, 0)
 	}
-	users[uuid] = userInfo
+
+	user.ID = uuid
+	users = append(users, user)
+	s.chatrooms[chatroomName] = users
 	s.chatroomsMutex.Unlock()
 
 	return uuid
 }
 
-func (s *Server) getChatroomUsers(chatroomName string) map[string]string {
+func (s *Server) getChatroomUsers(chatroomName string) []*model.User {
 	s.chatroomsMutex.Lock()
 	users, ok := s.chatrooms[chatroomName]
 	s.chatroomsMutex.Unlock()
 
 	if !ok {
-		return make(map[string]string)
+		return make([]*model.User, 0)
 	}
 
-	result := make(map[string]string)
-	for uuid, userInfo := range users {
-		result[uuid] = userInfo.nickname
-	}
-
-	return result
+	return users
 }
