@@ -22,5 +22,6 @@ type Message struct {
 // Broadcast broadcast a meessage to all users on a specific chatroom
 type Broadcast struct {
 	Chatroom string //Chatroom name
+	FromID   string
 	Message  string
 }

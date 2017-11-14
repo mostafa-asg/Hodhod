@@ -165,16 +165,55 @@ func receiveMessage(t *testing.T, client *clientInfo, expectedMessages []string)
 	count := 0
 
 	for count < len(expectedMessages) {
-		decoder.Decode(&metadata)
+		err := decoder.Decode(&metadata)
+		if err != nil {
+			t.Fatal("error decoding Metadata")
+		}
 
 		if metadata.EventType == "new_msg" {
-			decoder.Decode(&msg)
+			err := decoder.Decode(&msg)
+			if err != nil {
+				t.Error("error decoding Metadata")
+			}
 			if !contains(expectedMessages, msg.Message) {
 				t.Errorf("invalid message : %s", msg.Message)
 			}
 			count++
 		}
 	}
+}
+
+func broadcastMessage(sender *clientInfo, chatroom string, message string) {
+	encoder := encoding.NewEncoder(sender.connection)
+	encoder.Encode(&model.Metadata{EventType: "broadcast_msg"})
+	encoder.Encode(&event.Broadcast{Chatroom: chatroom, FromID: sender.id, Message: message})
+}
+
+func receiveBroadcastMessage(t *testing.T, client *clientInfo, expectedMessages []string, wg *sync.WaitGroup) {
+	decoder := encoding.NewDecoder(client.connection)
+
+	var metadata model.Metadata
+	var msg event.NewBroadcastMessage
+	count := 0
+
+	for count < len(expectedMessages) {
+		err := decoder.Decode(&metadata)
+		if err != nil {
+			t.Fatal("error decoding Metadata")
+		}
+
+		if metadata.EventType == "new_broadcast_msg" {
+			err := decoder.Decode(&msg)
+			if err != nil {
+				t.Fatal("error decoding NewBroadcastMessage")
+			}
+			if !contains(expectedMessages, msg.Message) {
+				t.Errorf("invalid message : %s", msg.Message)
+			}
+			count++
+		}
+	}
+	wg.Done()
 }
 
 func TestMessageBetweenTwoUser(t *testing.T) {
@@ -194,6 +233,43 @@ func TestMessageBetweenTwoUser(t *testing.T) {
 
 	client1.connection.Close()
 	client2.connection.Close()
+
+	//stop the server
+	err := s.Stop()
+	if err != nil {
+		t.Error("Error in closing the server", err)
+	}
+}
+
+func TestBroadcastMessage(t *testing.T) {
+
+	s := startTheServer(t)
+	var wg sync.WaitGroup
+
+	client1 := connectToServer(t, s.HostAndPort(), "John", "room1", nil, []string{"Sara", "Bill", "Kevin"}, &wg)
+
+	client2 := connectToServer(t, s.HostAndPort(), "Sara", "room1", []string{"John"}, []string{"Bill", "Kevin"}, &wg)
+
+	client3 := connectToServer(t, s.HostAndPort(), "Bill", "room1", []string{"John", "Sara"}, []string{"Kevin"}, &wg)
+
+	client4 := connectToServer(t, s.HostAndPort(), "Kevin", "room1", []string{"John", "Sara", "Bill"}, nil, &wg)
+
+	wg.Wait()
+
+	broadcastMessage(client1, "room1", "Hi guys")
+	broadcastMessage(client1, "room1", "What's up?")
+
+	wg.Add(3)
+	go receiveBroadcastMessage(t, client2, []string{"Hi guys", "What's up?"}, &wg)
+	go receiveBroadcastMessage(t, client3, []string{"Hi guys", "What's up?"}, &wg)
+	go receiveBroadcastMessage(t, client4, []string{"Hi guys", "What's up?"}, &wg)
+	wg.Wait()
+
+	//Stop clients
+	client1.connection.Close()
+	client2.connection.Close()
+	client3.connection.Close()
+	client4.connection.Close()
 
 	//stop the server
 	err := s.Stop()

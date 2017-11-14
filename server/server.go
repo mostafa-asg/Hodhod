@@ -3,6 +3,7 @@ package server
 import (
 	encoding "encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -134,8 +135,39 @@ func accept(s *Server, con net.Conn) {
 			encoder := encoding.NewEncoder(recipient.Connection)
 			encoder.Encode(&model.Metadata{EventType: "new_msg"})
 			encoder.Encode(&event.NewMessage{FromID: msg.FromID, Message: msg.Message})
+		case "broadcast_msg":
+			var msg event.Broadcast
+			err := decoder.Decode(&msg)
+			if err != nil {
+				if err == io.EOF {
+					return
+				}
+				log.Println("error decoding broadcast request from client", err)
+				return
+			}
+			users := s.chatrooms[msg.Chatroom]
+			go broadcastMessage(users, msg.FromID, msg.Message)
 		}
 	}
+}
+
+func broadcastMessage(users []*model.User, senderID string, message string) {
+
+	for _, user := range users {
+		if user.ID != senderID {
+
+			go func(user *model.User, senderID string, message string) {
+
+				fmt.Printf("FROM SERVER : %s\n", message)
+				encoder := encoding.NewEncoder(user.Connection)
+				encoder.Encode(&model.Metadata{EventType: "new_broadcast_msg"})
+				encoder.Encode(&event.NewBroadcastMessage{FromID: senderID, Message: message})
+
+			}(user, senderID, message)
+
+		}
+	}
+
 }
 
 func find(users []*model.User, userID string) (usr *model.User, err error) {
